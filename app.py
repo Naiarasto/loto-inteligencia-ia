@@ -332,9 +332,10 @@ else:
     freq = pd.Series(0, index=range(1, cfg["max"] + 1))
 
 st.divider()
-st.subheader("Gerador de 10 jogos")
+st.subheader("Gerador de jogos")
 st.write(f"**Custo de 1 jogo simples:** {money(cfg['price'])}")
-st.write(f"**Investimento total para 10 jogos:** {money(cfg['price'] * 10)}")
+game_count = st.selectbox("Quantidade de jogos que deseja gerar", [5, 10, 20], index=1)
+st.write(f"**Investimento total para {game_count} jogos:** {money(cfg['price'] * game_count)}")
 method = st.radio(
     "Método de simulação", ["Equilibrado", "Aleatório"], horizontal=True,
     help="Equilibrado usa ponderação muito leve das frequências históricas. Aleatório dá peso igual a todas as dezenas. Nenhum método prevê o sorteio."
@@ -352,17 +353,20 @@ sum_range = st.slider(
     min_value=min_sum, max_value=max_sum, value=(min_sum, max_sum)
 )
 st.caption("Os filtros restringem as combinações geradas; não aumentam a probabilidade matemática de acerto.")
-if st.button("Gerar 10 jogos", type="primary"):
-    games = create_games(lottery, freq, 10, method, even_range, sum_range)
-    if len(games) < 10:
+if st.button(f"Gerar {game_count} jogos", type="primary"):
+    games = create_games(lottery, freq, game_count, method, even_range, sum_range)
+    if len(games) < game_count:
         st.warning(f"Foram encontradas apenas {len(games)} combinações com esses filtros. Amplie os intervalos e tente novamente.")
-
     st.session_state["games"] = games
     st.session_state["games_lottery"] = lottery
     st.session_state["games_method"] = method
+    st.session_state["games_count"] = len(games)
+    st.session_state["games_price"] = cfg["price"]
 
 if st.session_state.get("games") and st.session_state.get("games_lottery") == lottery:
-    st.caption(f"Método: {st.session_state.get('games_method')} • Combinações únicas")
+    generated_count = len(st.session_state["games"])
+    st.caption(f"{generated_count} jogo(s) gerado(s) • Método: {st.session_state.get('games_method')} • Combinações únicas")
+    st.write(f"**Investimento calculado:** {money(cfg['price'] * generated_count)}")
     for i, game in enumerate(st.session_state["games"], 1):
         st.write(f"**Jogo {i:02d}:** " + " · ".join(f"{n:02d}" for n in game))
     csv_games = pd.DataFrame(st.session_state["games"], columns=[f"dezena_{i}" for i in range(1, cfg["draw"] + 1)])
