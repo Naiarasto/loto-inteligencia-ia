@@ -112,6 +112,51 @@ def count_numbers(df, fields, number_max):
     values = df[fields].to_numpy().ravel().tolist()
     return pd.Series(Counter(values)).reindex(range(1, number_max + 1), fill_value=0)
 
+def combination_patterns(df, fields, lottery):
+    cfg = LOTTERIES[lottery]
+    rows = []
+    pair_counts = Counter()
+    triple_counts = Counter()
+    parity_counts = Counter()
+    repeat_counts = Counter()
+    consecutive_counts = Counter()
+    previous = None
+    for _, row in df.iterrows():
+        nums = sorted(int(row[c]) for c in fields)
+        evens = sum(n % 2 == 0 for n in nums)
+        parity_counts[f"{evens} pares / {len(nums)-evens} ímpares"] += 1
+        for i in range(len(nums)-1):
+            if nums[i+1] == nums[i] + 1:
+                consecutive_counts["Pelo menos uma sequência consecutiva"] += 1
+                break
+        for i in range(len(nums)):
+            for j in range(i+1, len(nums)):
+                pair_counts[(nums[i], nums[j])] += 1
+                for k in range(j+1, len(nums)):
+                    triple_counts[(nums[i], nums[j], nums[k])] += 1
+        if previous is not None:
+            repeat_counts[len(set(nums) & previous)] += 1
+        previous = set(nums)
+    pairs = pd.DataFrame(
+        [{"Dezena 1": k[0], "Dezena 2": k[1], "Ocorrências": v}
+         for k, v in pair_counts.most_common(15)]
+    )
+    triples = pd.DataFrame(
+        [{"Dezenas": " - ".join(map(str, k)), "Ocorrências": v}
+         for k, v in triple_counts.most_common(15)]
+    )
+    parity = pd.DataFrame(
+        [{"Distribuição": k, "Concursos": v}
+         for k, v in parity_counts.most_common()]
+    )
+    repeats = pd.DataFrame(
+        [{"Dezenas repetidas do concurso anterior": k, "Concursos": v}
+         for k, v in sorted(repeat_counts.items())]
+    )
+    consecutive = int(consecutive_counts["Pelo menos uma sequência consecutiva"])
+    return pairs, triples, parity, repeats, consecutive
+
+
 @st.cache_data(show_spinner=False)
 def run_backtest(history, lottery, test_draws=100, training_window=200, tickets=10):
     cfg = LOTTERIES[lottery]
@@ -161,7 +206,7 @@ def create_games(lottery, freq, n_games=10, mode="Equilibrado"):
     return games
 
 st.title("🎯 Loto Inteligência IA")
-st.caption("Painel de análise estatística e simulação — versão 4")
+st.caption("Painel de análise estatística e simulação — versão 5")
 st.info(
     "Importante: sorteios são independentes. Frequências e atrasos descrevem "
     "o passado e não aumentam a chance de uma dezena sair no próximo concurso."
@@ -250,6 +295,23 @@ if full_df is not None and not full_df.empty:
     with right:
         st.markdown("**10 dezenas menos frequentes**")
         st.dataframe(stats.sort_values(["Ocorrências", "Dezena"]).head(10), hide_index=True, use_container_width=True)
+    st.divider()
+    st.subheader("Padrões históricos dos sorteios")
+    st.caption("Estas tabelas descrevem o histórico selecionado; não indicam quais dezenas serão sorteadas.")
+    pairs, triples, parity, repeats, consecutive = combination_patterns(df, fields, lottery)
+    p1, p2, p3 = st.columns(3)
+    p1.metric("Concursos com dezenas consecutivas", f"{consecutive:,}".replace(",", "."))
+    p2.metric("Pares diferentes observados", f"{len(pairs):,}".replace(",", "."))
+    p3.metric("Trincas diferentes observadas", f"{len(triples):,}".replace(",", "."))
+    tab1, tab2, tab3, tab4 = st.tabs(["Pares mais frequentes", "Trincas mais frequentes", "Pares e ímpares", "Repetições entre concursos"])
+    with tab1:
+        st.dataframe(pairs, hide_index=True, use_container_width=True)
+    with tab2:
+        st.dataframe(triples, hide_index=True, use_container_width=True)
+    with tab3:
+        st.dataframe(parity, hide_index=True, use_container_width=True)
+    with tab4:
+        st.dataframe(repeats, hide_index=True, use_container_width=True)
     with st.expander("Ver concursos carregados"):
         st.dataframe(df, hide_index=True, use_container_width=True)
     st.download_button(
