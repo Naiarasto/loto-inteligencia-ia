@@ -154,7 +154,7 @@ def combination_patterns(df, fields, lottery):
          for k, v in sorted(repeat_counts.items())]
     )
     consecutive = int(consecutive_counts["Pelo menos uma sequência consecutiva"])
-    return pairs, triples, parity, repeats, consecutive
+    return pairs, triples, parity, repeats, consecutive, len(pair_counts), len(triple_counts)
 
 
 @st.cache_data(show_spinner=False)
@@ -184,7 +184,7 @@ def run_backtest(history, lottery, test_draws=100, training_window=200, tickets=
         records.append(row)
     return pd.DataFrame(records)
 
-def create_games(lottery, freq, n_games=10, mode="Equilibrado"):
+def create_games(lottery, freq, n_games=10, mode="Equilibrado", even_range=None, sum_range=None):
     cfg = LOTTERIES[lottery]
     nums = np.arange(cfg["min"], cfg["max"] + 1)
     games, seen = [], set()
@@ -200,6 +200,12 @@ def create_games(lottery, freq, n_games=10, mode="Equilibrado"):
         pick = tuple(sorted(np.random.choice(
             nums, size=cfg["draw"], replace=False, p=weights / weights.sum()
         ).tolist()))
+        even_count = sum(n % 2 == 0 for n in pick)
+        total_sum = sum(pick)
+        if even_range is not None and not (even_range[0] <= even_count <= even_range[1]):
+            continue
+        if sum_range is not None and not (sum_range[0] <= total_sum <= sum_range[1]):
+            continue
         if pick not in seen:
             seen.add(pick)
             games.append(pick)
@@ -298,11 +304,12 @@ if full_df is not None and not full_df.empty:
     st.divider()
     st.subheader("Padrões históricos dos sorteios")
     st.caption("Estas tabelas descrevem o histórico selecionado; não indicam quais dezenas serão sorteadas.")
-    pairs, triples, parity, repeats, consecutive = combination_patterns(df, fields, lottery)
+    pairs, triples, parity, repeats, consecutive, pair_total, triple_total = combination_patterns(df, fields, lottery)
     p1, p2, p3 = st.columns(3)
     p1.metric("Concursos com dezenas consecutivas", f"{consecutive:,}".replace(",", "."))
-    p2.metric("Pares diferentes observados", f"{len(pairs):,}".replace(",", "."))
-    p3.metric("Trincas diferentes observadas", f"{len(triples):,}".replace(",", "."))
+    p2.metric("Pares distintos no histórico", f"{pair_total:,}".replace(",", "."))
+    p3.metric("Trincas distintas no histórico", f"{triple_total:,}".replace(",", "."))
+    st.caption("As tabelas abaixo mostram os 15 pares e as 15 trincas mais frequentes; os indicadores contam todas as combinações distintas encontradas.")
     tab1, tab2, tab3, tab4 = st.tabs(["Pares mais frequentes", "Trincas mais frequentes", "Pares e ímpares", "Repetições entre concursos"])
     with tab1:
         st.dataframe(pairs, hide_index=True, use_container_width=True)
@@ -332,8 +339,24 @@ method = st.radio(
     "Método de simulação", ["Equilibrado", "Aleatório"], horizontal=True,
     help="Equilibrado usa ponderação muito leve das frequências históricas. Aleatório dá peso igual a todas as dezenas. Nenhum método prevê o sorteio."
 )
+even_max = cfg["draw"]
+default_even = [max(0, cfg["draw"] // 3), min(even_max, (2 * cfg["draw"]) // 3)]
+even_range = st.slider(
+    "Quantidade de dezenas pares por jogo",
+    min_value=0, max_value=even_max, value=default_even
+)
+min_sum = sum(range(cfg["min"], cfg["min"] + cfg["draw"]))
+max_sum = sum(range(cfg["max"] - cfg["draw"] + 1, cfg["max"] + 1))
+sum_range = st.slider(
+    "Soma mínima e máxima das dezenas",
+    min_value=min_sum, max_value=max_sum, value=(min_sum, max_sum)
+)
+st.caption("Os filtros restringem as combinações geradas; não aumentam a probabilidade matemática de acerto.")
 if st.button("Gerar 10 jogos", type="primary"):
-    games = create_games(lottery, freq, 10, method)
+    games = create_games(lottery, freq, 10, method, even_range, sum_range)
+    if len(games) < 10:
+        st.warning(f"Foram encontradas apenas {len(games)} combinações com esses filtros. Amplie os intervalos e tente novamente.")
+
     st.session_state["games"] = games
     st.session_state["games_lottery"] = lottery
     st.session_state["games_method"] = method
