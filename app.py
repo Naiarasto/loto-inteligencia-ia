@@ -73,30 +73,20 @@ def validate_history(df, lottery):
 
 @st.cache_data(ttl=86400, show_spinner=False)
 def get_full_history(lottery):
-    cfg = LOTTERIES[lottery]
-    url = "https://servicebus2.caixa.gov.br/portaldeloterias/api/resultados/download"
-    response = requests.get(
-        url, params={"modalidade": cfg["download_name"]},
-        headers=HEADERS, timeout=90
-    )
+    # CSV do LotoAgora, compilado a partir dos resultados divulgados pela CAIXA.
+    file_name = "lotofacil.csv" if lottery == "Lotofácil" else "mega-sena.csv"
+    url = f"https://lotoagora.com.br/downloads/{file_name}"
+    response = requests.get(url, headers=HEADERS, timeout=90)
     response.raise_for_status()
     if not response.content:
-        raise ValueError("A CAIXA retornou um arquivo vazio.")
+        raise ValueError("O arquivo histórico retornou vazio.")
     try:
-        raw = pd.read_excel(io.BytesIO(response.content), engine="xlrd")
+        raw = pd.read_csv(io.BytesIO(response.content), sep=";", encoding="utf-8-sig")
     except Exception:
-        try:
-            raw = pd.read_excel(io.BytesIO(response.content), engine="openpyxl")
-        except Exception:
-            try:
-                raw = pd.read_csv(io.BytesIO(response.content), sep=None, engine="python")
-            except Exception as exc:
-                raise ValueError(
-                    "Não consegui interpretar o arquivo histórico enviado pelo serviço da CAIXA."
-                ) from exc
+        raw = pd.read_csv(io.BytesIO(response.content), sep=None, engine="python", encoding="utf-8-sig")
     history = validate_history(raw, lottery)
     if history.empty:
-        raise ValueError("O arquivo foi recebido, mas não continha concursos válidos.")
+        raise ValueError("O arquivo foi recebido, mas nenhuma linha válida foi encontrada.")
     return history
 
 @st.cache_data(ttl=3600, show_spinner=False)
@@ -185,7 +175,7 @@ with refresh_col:
     if st.button("Atualizar resultado"):
         get_latest_result.clear()
 with info_col:
-    st.caption("Consulta ao serviço de resultados do Portal Loterias CAIXA; o histórico fica em cache por até 24 horas.")
+    st.caption("Último resultado: Portal Loterias CAIXA. Histórico: CSV do LotoAgora, compilado a partir dos resultados divulgados pela CAIXA; cache de até 24 horas.")
 
 try:
     latest = get_latest_result(lottery)
@@ -274,5 +264,5 @@ st.subheader("Probabilidade de acertar o prêmio principal")
 total = comb(cfg["max"], cfg["draw"])
 st.metric("Aposta simples", f"1 em {total:,}".replace(",", "."))
 st.caption("Probabilidade matemática de uma combinação simples, independentemente dos resultados anteriores.")
-st.caption("A fonte de dados histórica usa um endpoint público do Portal Loterias CAIXA, não documentado como API oficial e sujeito a mudanças. Confira resultados e preços nos canais oficiais.")
+st.caption("Fonte do histórico: LotoAgora (compilação de resultados divulgados pela CAIXA). Consulte a atribuição e a licença em lotoagora.com.br. Confira os resultados no portal oficial da CAIXA.")
 st.caption("Projeto experimental e independente, sem vínculo com a CAIXA.")
