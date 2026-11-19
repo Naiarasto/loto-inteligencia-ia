@@ -112,6 +112,33 @@ def count_numbers(df, fields, number_max):
     values = df[fields].to_numpy().ravel().tolist()
     return pd.Series(Counter(values)).reindex(range(1, number_max + 1), fill_value=0)
 
+@st.cache_data(show_spinner=False)
+def run_backtest(history, lottery, test_draws=100, training_window=200, tickets=10):
+    cfg = LOTTERIES[lottery]
+    fields = cfg["fields"]
+    history = history.reset_index(drop=True)
+    min_train = 30
+    if len(history) <= min_train:
+        raise ValueError("São necessários pelo menos 31 concursos para realizar o teste.")
+    n_test = min(test_draws, len(history) - min_train)
+    start = len(history) - n_test
+    records = []
+    for idx in range(start, len(history)):
+        train_start = max(0, idx - training_window)
+        train = history.iloc[train_start:idx]
+        actual = set(int(v) for v in history.iloc[idx][fields].tolist())
+        freq = count_numbers(train, fields, cfg["max"])
+        row = {"Concurso": int(history.iloc[idx]["concurso"]) if "concurso" in history.columns else idx + 1}
+        for mode in ["Equilibrado", "Aleatório"]:
+            portfolio = create_games(lottery, freq, tickets, mode)
+            hits = [len(set(game) & actual) for game in portfolio]
+            row[f"{mode} - melhor acerto"] = max(hits)
+            row[f"{mode} - média por jogo"] = float(np.mean(hits))
+            threshold = 11 if lottery == "Lotofácil" else 4
+            row[f"{mode} - concursos com faixa de prêmio"] = int(max(hits) >= threshold)
+        records.append(row)
+    return pd.DataFrame(records)
+
 def create_games(lottery, freq, n_games=10, mode="Equilibrado"):
     cfg = LOTTERIES[lottery]
     nums = np.arange(cfg["min"], cfg["max"] + 1)
@@ -134,7 +161,7 @@ def create_games(lottery, freq, n_games=10, mode="Equilibrado"):
     return games
 
 st.title("🎯 Loto Inteligência IA")
-st.caption("Painel de análise estatística e simulação — versão 3")
+st.caption("Painel de análise estatística e simulação — versão 4")
 st.info(
     "Importante: sorteios são independentes. Frequências e atrasos descrevem "
     "o passado e não aumentam a chance de uma dezena sair no próximo concurso."
@@ -258,6 +285,65 @@ if st.session_state.get("games") and st.session_state.get("games_lottery") == lo
         "Baixar jogos em CSV", csv_games.to_csv(index=False).encode("utf-8"),
         file_name=f"jogos_{lottery.lower().replace('-', '')}.csv", mime="text/csv"
     )
+
+st.divider()
+st.subheader("Teste retrospectivo (backtesting)")
+st.write(
+    "Este teste simula o que teria acontecido em concursos passados. "
+    "Em cada rodada, os jogos são montados usando somente concursos anteriores ao sorteio testado, "
+    "sem consultar o resultado futuro para escolher as dezenas."
+)
+if full_df is not None and len(full_df) > 30:
+    test_count = st.select_slider(
+        "Quantidade de concursos anteriores para testar",
+        options=[30, 50, 100, 200],
+        value=100
+    )
+    training_count = st.selectbox(
+        "Histórico usado para montar cada rodada",
+        [100, 200, 500],
+        index=1
+    )
+    if st.button("Executar backtesting", type="primary"):
+        with st.spinner("Testando as simulações nos concursos anteriores..."):
+            try:
+                result_test = run_backtest(full_df, lottery, test_count, training_count, 10)
+                st.session_state["backtest_result"] = result_test
+                st.session_state["backtest_lottery"] = lottery
+            except Exception as e:
+                st.error(f"Não foi possível executar o teste: {e}")
+    if st.session_state.get("backtest_lottery") == lottery and st.session_state.get("backtest_result") is not None:
+        result_test = st.session_state["backtest_result"]
+        summary_rows = []
+        threshold = 11 if lottery == "Lotofácil" else 4
+        for mode in ["Equilibrado", "Aleatório"]:
+            summary_rows.append({
+                "Método": mode,
+                "Média do melhor jogo": round(result_test[f"{mode} - melhor acerto"].mean(), 2),
+                "Média de acertos por aposta": round(result_test[f"{mode} - média por jogo"].mean(), 2),
+                f"Concursos com ao menos um jogo de {threshold}+ acertos": int(result_test[f"{mode} - concursos com faixa de prêmio"].sum())
+            })
+        st.markdown("**Comparação dos métodos**")
+        st.dataframe(pd.DataFrame(summary_rows), hide_index=True, use_container_width=True)
+        st.markdown("**Melhor quantidade de acertos em cada concurso testado**")
+        st.line_chart(result_test.set_index("Concurso")[[
+            "Equilibrado - melhor acerto", "Aleatório - melhor acerto"
+        ]])
+        with st.expander("Ver resultado de cada concurso"):
+            st.dataframe(result_test, hide_index=True, use_container_width=True)
+        st.download_button(
+            "Baixar relatório do backtesting em CSV",
+            result_test.to_csv(index=False).encode("utf-8-sig"),
+            file_name=f"backtesting_{lottery.lower().replace('-', '')}.csv",
+            mime="text/csv"
+        )
+    st.caption(
+        "A faixa mínima mostrada é 11 acertos na Lotofácil e 4 na Mega-Sena. "
+        "O teste não calcula lucro líquido nem reproduz todas as regras de premiação. "
+        "Resultados históricos não indicam maior chance em concursos futuros."
+    )
+else:
+    st.info("Carregue um histórico com pelo menos 31 concursos para habilitar o backtesting.")
 
 st.divider()
 st.subheader("Probabilidade de acertar o prêmio principal")
