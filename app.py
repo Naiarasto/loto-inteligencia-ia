@@ -86,11 +86,14 @@ def get_full_history(lottery):
         raw = pd.read_excel(io.BytesIO(response.content), engine="xlrd")
     except Exception:
         try:
-            raw = pd.read_csv(io.BytesIO(response.content), sep=None, engine="python")
-        except Exception as exc:
-            raise ValueError(
-                "Não consegui interpretar o arquivo histórico enviado pelo serviço da CAIXA."
-            ) from exc
+            raw = pd.read_excel(io.BytesIO(response.content), engine="openpyxl")
+        except Exception:
+            try:
+                raw = pd.read_csv(io.BytesIO(response.content), sep=None, engine="python")
+            except Exception as exc:
+                raise ValueError(
+                    "Não consegui interpretar o arquivo histórico enviado pelo serviço da CAIXA."
+                ) from exc
     history = validate_history(raw, lottery)
     if history.empty:
         raise ValueError("O arquivo foi recebido, mas não continha concursos válidos.")
